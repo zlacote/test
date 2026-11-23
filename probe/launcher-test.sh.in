@@ -1,0 +1,77 @@
+#!/data/data/com.termux/files/usr/bin/bash
+# Ayana launcher test. Builds the in-process launcher prototype and runs the
+# Debian rootfs of proot-distro through it, without proot.
+# Writes only to $HOME/ayana-probe, $TMPDIR and $HOME/ayana-report-launcher.txt.
+
+OUT="$HOME/ayana-report-launcher.txt"
+WORK="$HOME/ayana-probe"
+mkdir -p "$WORK" "${TMPDIR:=$PREFIX/tmp}"
+exec > >(tee "$OUT") 2>&1
+
+sec() { echo; echo "=== $1 ==="; }
+run() {  # run "<shell command>" [max_lines]
+  echo "\$ $1"
+  bash -c "$1" 2>&1 | head -n "${2:-25}"
+  echo "[rc=${PIPESTATUS[0]}]"
+}
+
+sec "0. setup"
+command -v clang >/dev/null 2>&1 || pkg install -y clang >/dev/null 2>&1
+cat > "$WORK/ayana-run.c" <<'CEOF'
+@@AYANA_RUN_C@@
+CEOF
+RUN="$TMPDIR/ayana-run"
+if ! clang -static -nostdlib -fno-pie -no-pie -ffreestanding -fno-stack-protector \
+     -mno-outline-atomics -O2 -w -Wl,--image-base=0x10000000 \
+     -o "$RUN" "$WORK/ayana-run.c" 2>"$WORK/cc-launcher.log"; then
+  echo "launcher compile FAILED:"; head -n 30 "$WORK/cc-launcher.log"; exit 1
+fi
+echo "launcher built: $RUN"
+LD=$(find "$PREFIX/var/lib" -path '*aarch64-linux-gnu/ld-linux-aarch64.so.1' -type f 2>/dev/null | head -n 1)
+[ -z "$LD" ] && { echo "no Debian rootfs found"; exit 1; }
+R="${LD%/usr/lib/aarch64-linux-gnu/ld-linux-aarch64.so.1}"
+R="${R%/lib/aarch64-linux-gnu/ld-linux-aarch64.so.1}"
+echo "rootfs: $R"
+export RUN LD R LP="$R/usr/lib/aarch64-linux-gnu:$R/lib/aarch64-linux-gnu"
+# A: handler only, real paths.  B: handler + path mapping, Debian sees its own /.
+A='"$RUN" "$LD" --library-path "$LP"'
+B='env -i HOME=/root TERM="$TERM" LANG=C.UTF-8 PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin ANDROID_ROOT=/system ANDROID_DATA=/data "$RUN" --root "$R" /lib/ld-linux-aarch64.so.1 /usr/bin/bash -c'
+
+sec "1. mode A: glibc start with SIGSYS -> ENOSYS"
+run "$A \"\$R/usr/bin/true\"; echo \"true rc=\$?\""
+run "$A \"\$R/usr/bin/uname\" -a"
+run "$A \"\$R/usr/bin/id\""
+run "$A \"\$R/usr/bin/ls\" \"\$HOME\"" 5
+run "$A \"\$R/usr/bin/cat\" \"\$R/etc/os-release\"" 3
+run "$A \"\$R/usr/bin/bash\" -c 'echo bash \$BASH_VERSION; ls >/dev/null; echo child rc=\$?'"
+
+sec "2. mode B: Debian sees its own root"
+run "$B 'cat /etc/os-release | head -n 2'"
+run "$B 'ls /; ls /usr/bin | wc -l'" 30
+run "$B 'grep -i seccomp /proc/self/status'"
+run "$B 'id; whoami'"
+run "$B 'sh -c \"sh -c \\\"echo nested exec ok\\\"\"'"
+run "$B 'cd /etc && ls | head -n 3 && pwd'"
+run "$B 'mkdir -p /tmp/ayana-t && echo hi > /tmp/ayana-t/a && mv /tmp/ayana-t/a /tmp/ayana-t/b && cat /tmp/ayana-t/b && rm -r /tmp/ayana-t'"
+run "$B 'awk \"BEGIN{print 42}\"; ls -l /usr/bin/awk /etc/alternatives/awk'"
+run "$B 'cat /etc/resolv.conf; getent hosts deb.debian.org'"
+run "$B 'perl -e \"print qq(perl ok\\n)\"; command -v python3 && python3 -c \"import os; print(os.uname().release)\"'"
+run "$B 'dpkg-query -W | wc -l; apt-get --version | head -n 1'"
+run "$B '/data/data/com.termux/files/usr/bin/uname -m; echo bionic child rc=\$?'"
+run "$B 'timeout 120 apt-get update 2>&1 | tail -n 8'" 12
+
+sec "3. speed"
+run "$B 'time ls -lR /usr/share/ >/dev/null'"
+run "time $A \"\$R/usr/bin/ls\" -lR \"\$R/usr/share/\" >/dev/null"
+run "$B 'time (for i in 1 2 3 4 5 6 7 8 9 10; do /usr/bin/true; done)'"
+if command -v proot-distro >/dev/null 2>&1; then
+  run 'time proot-distro login debian -- ls -lR /usr/share/ >/dev/null'
+  run 'time (for i in 1 2 3; do proot-distro login debian -- true; done)'
+  run 'proot-distro login debian -- sh -c "uname -r; cat /proc/version"'
+fi
+
+sec "done"
+echo "report saved to $OUT"
+if [ -d "$HOME/storage/downloads" ]; then
+  cp "$OUT" "$HOME/storage/downloads/ayana-report-launcher.txt" && echo "copied to Downloads/ayana-report-launcher.txt"
+fi
