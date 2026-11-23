@@ -166,6 +166,8 @@ static void __attribute__((noreturn)) die(const char *msg, long code) {
 /* ------------------------------------------------------------------ */
 static char g_root[PATH_CAP];
 static size_t g_rootlen;
+static char g_kroot[PATH_CAP]; /* the same directory as the kernel names it in getcwd/readlink */
+static size_t g_krootlen;
 static int g_map_on;
 static char g_self[PATH_CAP];
 
@@ -196,13 +198,19 @@ static int map_path(const char *in, char *out_buf) {
 
 /* Reverse of map_path for paths the kernel hands back (readlink, getcwd):
  * strips the root prefix in place. n is the string length; returns the new one. */
+static long unmap_with(char *buf, long n, const char *root, size_t len) {
+  if (!len || n < (long)len) return -1;
+  for (size_t k = 0; k < len; k++) if (buf[k] != root[k]) return -1;
+  if (n == (long)len) { buf[0] = '/'; return 1; }
+  if (buf[len] != '/') return -1;
+  for (long k = (long)len; k < n; k++) buf[k - len] = buf[k];
+  return n - (long)len;
+}
 static long unmap_inplace(char *buf, long n) {
-  if (!g_map_on || n < (long)g_rootlen) return n;
-  for (size_t k = 0; k < g_rootlen; k++) if (buf[k] != g_root[k]) return n;
-  if (n == (long)g_rootlen) { buf[0] = '/'; return 1; }
-  if (buf[g_rootlen] != '/') return n;
-  for (long k = (long)g_rootlen; k < n; k++) buf[k - g_rootlen] = buf[k];
-  return n - (long)g_rootlen;
+  if (!g_map_on) return n;
+  long r = unmap_with(buf, n, g_root, g_rootlen);
+  if (r < 0) r = unmap_with(buf, n, g_kroot, g_krootlen);
+  return r < 0 ? n : r;
 }
 
 /* ------------------------------------------------------------------ */
@@ -763,6 +771,14 @@ static long install_filter(void) {
     f[n++] = (struct sock_filter)BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, list[i], 0, 1);
     f[n++] = (struct sock_filter)BPF_STMT(BPF_RET | BPF_K, SECCOMP_RET_TRAP | AYANA_TAG);
   }
+  /* clone3 from outside the gate answers ENOSYS without a signal: glibc then
+   * falls back to clone(). clone3 can carry CLONE_CLEAR_SIGHAND (posix_spawn,
+   * system(), popen() use it), which would start the child without our
+   * handler, and a stack-switching clone cannot be replayed from a handler. */
+#ifdef __NR_clone3
+  f[n++] = (struct sock_filter)BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, __NR_clone3, 0, 1);
+  f[n++] = (struct sock_filter)BPF_STMT(BPF_RET | BPF_K, SECCOMP_RET_ERRNO | E_NOSYS);
+#endif
   /* Signal mask and disposition changes go through the handler, see on_trapped. */
   f[n++] = (struct sock_filter)BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, __NR_rt_sigprocmask, 0, 1);
   f[n++] = (struct sock_filter)BPF_STMT(BPF_RET | BPF_K, SECCOMP_RET_TRAP | AYANA_TAG);
@@ -843,6 +859,20 @@ __attribute__((used)) void ayana_main(uintptr_t *sp) {
     memcpy(g_root, root, g_rootlen);
     g_root[g_rootlen] = 0;
     g_map_on = 1;
+    long dfd = SC(__NR_openat, AT_FDCWD, g_root, O_PATH | O_DIRECTORY | O_CLOEXEC, 0, 0, 0);
+    if (dfd >= 0) {
+      char fdp[32] = "/proc/self/fd/";
+      int p = 14;
+      char d[12];
+      int t = 0;
+      long v = dfd;
+      do { d[t++] = (char)('0' + v % 10); v /= 10; } while (v);
+      while (t) fdp[p++] = d[--t];
+      fdp[p] = 0;
+      long kn = SC(__NR_readlinkat, AT_FDCWD, fdp, g_kroot, PATH_CAP - 1, 0, 0);
+      if (kn > 0) { g_kroot[kn] = 0; g_krootlen = (size_t)kn; }
+      SC(__NR_close, dfd, 0, 0, 0, 0, 0);
+    }
     if (!filter_active()) {
       long r = install_filter();
       if (r) { out("ayana-run: own seccomp filter not installed, path mapping off ("); out_num(r); out(")\n"); g_map_on = 0; }

@@ -3,6 +3,9 @@ package dev.ayana.test;
 import android.app.Activity;
 import android.content.ContentValues;
 import android.graphics.Typeface;
+import android.net.ConnectivityManager;
+import android.net.LinkProperties;
+import android.net.Network;
 import android.net.Uri;
 import android.os.Bundle;
 import android.provider.MediaStore;
@@ -24,6 +27,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.io.OutputStream;
+import java.net.InetAddress;
 import java.nio.charset.StandardCharsets;
 import java.text.SimpleDateFormat;
 import java.util.Date;
@@ -92,11 +96,11 @@ public class MainActivity extends Activity {
                 try (InputStream in = getAssets().open("rootfs.tar")) {
                     extractTar(in, rootfs, rootfs.getAbsolutePath());
                 }
-                writeText(new File(rootfs, "etc/resolv.conf"), "nameserver 8.8.8.8\nnameserver 1.1.1.1\n");
                 writeText(new File(rootfs, "etc/hosts"), "127.0.0.1 localhost\n::1 localhost\n");
                 if (!marker.createNewFile()) append("warning: cannot create marker");
                 append("extracted in " + (System.currentTimeMillis() - t0) + " ms");
             }
+            writeText(new File(rootfs, "etc/resolv.conf"), resolvConf());
             append("phantom process monitor setting: "
                     + Settings.Global.getString(getContentResolver(), "settings_enable_monitor_phantom_procs"));
             File script = new File(getFilesDir(), "apptest.sh");
@@ -121,6 +125,31 @@ public class MainActivity extends Activity {
         }
         saveReport();
         runOnUiThread(() -> button.setEnabled(true));
+    }
+
+    /** DNS servers of the active network first (what Android itself uses), public ones as fallback. */
+    private String resolvConf() {
+        StringBuilder rc = new StringBuilder();
+        try {
+            ConnectivityManager cm = getSystemService(ConnectivityManager.class);
+            Network net = cm == null ? null : cm.getActiveNetwork();
+            LinkProperties lp = net == null ? null : cm.getLinkProperties(net);
+            if (lp != null) {
+                append("network DNS: " + lp.getDnsServers() + " private DNS active=" + lp.isPrivateDnsActive()
+                        + " server=" + lp.getPrivateDnsServerName());
+                int n = 0;
+                for (InetAddress a : lp.getDnsServers()) {
+                    if (n++ == 2) break;
+                    rc.append("nameserver ").append(a.getHostAddress()).append('\n');
+                }
+            } else {
+                append("network DNS: no active network");
+            }
+        } catch (Throwable e) {
+            append("network DNS: " + e);
+        }
+        rc.append("nameserver 8.8.8.8\nnameserver 1.1.1.1\n");
+        return rc.toString();
     }
 
     private void saveReport() {

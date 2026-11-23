@@ -76,7 +76,7 @@ run "$BF 'ln -sf /usr/bin/mawk /tmp/l && readlink /tmp/l && /tmp/l \"BEGIN{print
 run "$BF 'touch /tmp/o && chown 42:42 /tmp/o && echo chown ok && stat -c \"%U %G\" /tmp/o; rm /tmp/o'"
 
 sec "8. apt and real packages"
-run "$BF 'ls /etc/apt/apt.conf.d; grep -hv \"^//\" /etc/apt/apt.conf.d/* | head -n 15'" 25
+run "$BF 'cat /etc/resolv.conf; getent hosts deb.debian.org; echo dns rc=\$?'"
 run "$BF 'timeout 180 apt-get -o Debug::RunScripts=true update 2>&1 | tail -n 15; echo apt-update rc=\${PIPESTATUS[0]}'" 20
 run "$BF 'time timeout 900 apt-get install -y --no-install-recommends file procps python3 git ca-certificates hostname 2>&1 | grep -vE \"^(Get|Selecting|Preparing|Unpacking|Setting up|Processing)\" | tail -n 25; echo apt-install rc=\${PIPESTATUS[0]}'" 40
 run "$BF 'dpkg -l file procps python3 git ca-certificates hostname 2>&1 | tail -n 6'"

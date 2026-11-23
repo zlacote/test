@@ -5,4 +5,5 @@ public class Context {
   public android.content.res.AssetManager getAssets() { return null; }
   public android.content.pm.ApplicationInfo getApplicationInfo() { return null; }
   public ContentResolver getContentResolver() { return null; }
+  public <T> T getSystemService(Class<T> c) { return null; }
 }
