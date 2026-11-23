@@ -1,0 +1,89 @@
+Warning: This version only understands SDK XML versions up to 3 but an SDK XML file of version 4 was encountered. This can happen if you use versions of Android Studio and the command-line tools that were released at different times.
+Loading package information...                                                  Loading local repository...                                                     [                                       ] 3% Loading local repository...        [                                       ] 3% Fetch remote repository...         [=                                      ] 3% Fetch remote repository...         [=                                      ] 4% Fetch remote repository...         [=                                      ] 5% Fetch remote repository...         [==                                     ] 5% Fetch remote repository...         [==                                     ] 6% Fetch remote repository...         [==                                     ] 7% Fetch remote repository...         [==                                     ] 7% Computing updates...               [===                                    ] 8% Computing updates...               [===                                    ] 10% Computing updates...              [===                                    ] 10% Installing NDK (Side by side) 26.1[===                                    ] 10% Downloading android-ndk-r26b-linux[====                                   ] 10% Downloading android-ndk-r26b-linux[====                                   ] 11% Downloading android-ndk-r26b-linux[====                                   ] 12% Downloading android-ndk-r26b-linux[=====                                  ] 13% Downloading android-ndk-r26b-linux[=====                                  ] 14% Downloading android-ndk-r26b-linux[=====                                  ] 15% Downloading android-ndk-r26b-linux[======                                 ] 15% Downloading android-ndk-r26b-linux[======                                 ] 16% Downloading android-ndk-r26b-linux[======                                 ] 17% Downloading android-ndk-r26b-linux[=======                                ] 18% Downloading android-ndk-r26b-linux[=======                                ] 19% Downloading android-ndk-r26b-linux[=======                                ] 20% Downloading android-ndk-r26b-linux[========                               ] 20% Downloading android-ndk-r26b-linux[========                               ] 21% Downloading android-ndk-r26b-linux[========                               ] 22% Downloading android-ndk-r26b-linux[=========                              ] 23% Downloading android-ndk-r26b-linux[=========                              ] 24% Downloading android-ndk-r26b-linux[=========                              ] 25% Downloading android-ndk-r26b-linux[==========                             ] 25% Downloading android-ndk-r26b-linux[==========                             ] 26% Downloading android-ndk-r26b-linux[==========                             ] 27% Downloading android-ndk-r26b-linux[===========                            ] 28% Downloading android-ndk-r26b-linux[===========                            ] 29% Downloading android-ndk-r26b-linux[===========                            ] 30% Downloading android-ndk-r26b-linux[============                           ] 30% Downloading android-ndk-r26b-linux[============                           ] 31% Downloading android-ndk-r26b-linux[============                           ] 32% Downloading android-ndk-r26b-linux[============                           ] 33% Downloading android-ndk-r26b-linux[============                           ] 33% Unzipping...                      [============                           ] 33% Unzipping... android-ndk-r26b/    [============                           ] 33% Unzipping... android-ndk-r26b/CHAN[=============                          ] 33% Unzipping... android-ndk-r26b/CHAN[=============                          ] 33% Unzipping... android-ndk-r26b/wrap[=============                          ] 33% Unzipping... android-ndk-r26b/preb[=============                          ] 33% Unzipping... android-ndk-r26b/buil[=============                          ] 33% Unzipping... android-ndk-r26b/NOTI[=============                          ] 33% Unzipping... android-ndk-r26b/ndk-[=============                          ] 33% Unzipping... android-ndk-r26b/NOTI[=============                          ] 33% Unzipping... android-ndk-r26b/meta[=============                          ] 33% Unzipping... android-ndk-r26b/ndk-[=============                          ] 33% Unzipping... android-ndk-r26b/pyth[=============                          ] 33% Unzipping... android-ndk-r26b/sour[=============                          ] 33% Unzipping... android-ndk-r26b/simp[=============                          ] 33% Unzipping... android-ndk-r26b/ndk-[=============                          ] 33% Unzipping... android-ndk-r26b/READ[=============                          ] 33% Unzipping... android-ndk-r26b/tool[=============                          ] 34% Unzipping... android-ndk-r26b/tool[=============                          ] 35% Unzipping... android-ndk-r26b/tool[==============                         ] 35% Unzipping... android-ndk-r26b/tool[==============                         ] 36% Unzipping... android-ndk-r26b/tool[==============                         ] 37% Unzipping... android-ndk-r26b/tool[===============                        ] 38% Unzipping... android-ndk-r26b/tool[===============                        ] 39% Unzipping... android-ndk-r26b/tool[===============                        ] 40% Unzipping... android-ndk-r26b/tool[================                       ] 40% Unzipping... android-ndk-r26b/tool[================                       ] 41% Unzipping... android-ndk-r26b/tool[================                       ] 42% Unzipping... android-ndk-r26b/tool[=================                      ] 43% Unzipping... android-ndk-r26b/tool[=================                      ] 44% Unzipping... android-ndk-r26b/tool[=================                      ] 45% Unzipping... android-ndk-r26b/tool[==================                     ] 45% Unzipping... android-ndk-r26b/tool[==================                     ] 46% Unzipping... android-ndk-r26b/tool[==================                     ] 47% Unzipping... android-ndk-r26b/tool[===================                    ] 48% Unzipping... android-ndk-r26b/tool[===================                    ] 49% Unzipping... android-ndk-r26b/tool[===================                    ] 50% Unzipping... android-ndk-r26b/tool[====================                   ] 50% Unzipping... android-ndk-r26b/tool[====================                   ] 51% Unzipping... android-ndk-r26b/tool[====================                   ] 52% Unzipping... android-ndk-r26b/tool[=====================                  ] 53% Unzipping... android-ndk-r26b/tool[=====================                  ] 54% Unzipping... android-ndk-r26b/tool[=====================                  ] 55% Unzipping... android-ndk-r26b/tool[=====================                  ] 55% Unzipping... android-ndk-r26b/ndk-[=====================                  ] 55% Unzipping... android-ndk-r26b/shad[=======================================] 100% Unzipping... android-ndk-r26b/sha
+
+total 100772
+drwxr-xr-x 2 runner runner      4096 Nov 23 20:05 .
+drwxr-xr-x 4 runner runner      4096 Nov 23 20:05 ..
+-rw-r--r-- 1 runner runner      5334 Nov 23 20:05 apptest.sh
+-rw-r--r-- 1 runner runner 103174144 Nov 23 20:05 rootfs.tar
+ndk: /usr/local/lib/android/sdk/ndk/26.1.10909125
+android/app/src/main/jniLibs/arm64-v8a/libayanaprobe.so: ELF 64-bit LSB pie executable, ARM aarch64, version 1 (SYSV), dynamically linked, interpreter /system/bin/linker64, for Android 29, built by NDK r26b (10909125), not stripped
+android/app/src/main/jniLibs/arm64-v8a/libayanarun.so:   ELF 64-bit LSB executable, ARM aarch64, version 1 (SYSV), statically linked, not stripped
+android/app/src/main/jniLibs/arm64-v8a/libayanatrue.so:  ELF 64-bit LSB pie executable, ARM aarch64, version 1 (SYSV), dynamically linked, interpreter /system/bin/linker64, for Android 29, built by NDK r26b (10909125), not stripped
+To honour the JVM settings for this build a single-use Daemon process will be forked. For more on this, please refer to https://docs.gradle.org/8.9/userguide/gradle_daemon.html#sec:disabling_the_daemon in the Gradle documentation.
+Daemon will be stopped at the end of the build 
+> Task :app:preBuild UP-TO-DATE
+> Task :app:preReleaseBuild UP-TO-DATE
+> Task :app:generateReleaseResValues
+> Task :app:javaPreCompileRelease
+> Task :app:checkReleaseAarMetadata
+> Task :app:mapReleaseSourceSetPaths
+> Task :app:generateReleaseResources
+> Task :app:mergeReleaseResources
+> Task :app:packageReleaseResources
+> Task :app:createReleaseCompatibleScreenManifests
+> Task :app:extractDeepLinksRelease
+> Task :app:parseReleaseLocalResources
+> Task :app:processReleaseMainManifest
+> Task :app:processReleaseManifest
+> Task :app:extractProguardFiles
+> Task :app:mergeReleaseJniLibFolders
+> Task :app:processReleaseManifestForPackage
+> Task :app:mergeReleaseNativeLibs
+> Task :app:checkReleaseDuplicateClasses
+> Task :app:desugarReleaseFileDependencies
+> Task :app:mergeReleaseStartupProfile
+> Task :app:mergeExtDexRelease
+
+> Task :app:stripReleaseDebugSymbols
+Unable to strip the following libraries, packaging them as they are: libayanaprobe.so, libayanarun.so, libayanatrue.so.
+
+> Task :app:mergeReleaseArtProfile
+> Task :app:mergeReleaseShaders
+> Task :app:extractReleaseNativeSymbolTables
+> Task :app:compileReleaseShaders NO-SOURCE
+> Task :app:mergeReleaseNativeDebugMetadata NO-SOURCE
+> Task :app:generateReleaseAssets UP-TO-DATE
+> Task :app:processReleaseResources
+> Task :app:mergeReleaseAssets
+> Task :app:compileReleaseJavaWithJavac
+> Task :app:generateReleaseLintVitalReportModel
+> Task :app:dexBuilderRelease
+> Task :app:mergeReleaseGlobalSynthetics
+> Task :app:extractReleaseVersionControlInfo
+> Task :app:processReleaseJavaRes NO-SOURCE
+> Task :app:mergeDexRelease
+> Task :app:compileReleaseArtProfile
+> Task :app:mergeReleaseJavaResource
+> Task :app:collectReleaseDependencies
+> Task :app:sdkReleaseDependencyData
+> Task :app:validateSigningRelease
+> Task :app:writeReleaseAppMetadata
+> Task :app:writeReleaseSigningConfigVersions
+> Task :app:optimizeReleaseResources
+> Task :app:compressReleaseAssets
+> Task :app:lintVitalAnalyzeRelease
+> Task :app:packageRelease
+> Task :app:lintVitalReportRelease
+> Task :app:createReleaseApkListingFileRedirect
+> Task :app:lintVitalRelease
+> Task :app:assembleRelease
+gradle/actions: Writing build results to /home/runner/work/_temp/.gradle-actions/build-results/__run_4-1795464364429.json
+
+BUILD SUCCESSFUL in 21s
+46 actionable tasks: 46 executed
+Verifies
+Verified using v1 scheme (JAR signing): false
+Verified using v2 scheme (APK Signature Scheme v2): true
+Verified using v3 scheme (APK Signature Scheme v3): false
+Verified using v3.1 scheme (APK Signature Scheme v3.1): false
+Verified using v4 scheme (APK Signature Scheme v4): false
+package: name='dev.ayana.test' versionCode='6' versionName='0.6' platformBuildVersionName='15' platformBuildVersionCode='35' compileSdkVersion='35' compileSdkVersionCodename='15'
+minSdkVersion:'29'
+targetSdkVersion:'35'
+uses-permission: name='android.permission.INTERNET'
+    17560  1981-01-01 01:01   lib/arm64-v8a/libayanaprobe.so
+    16840  1981-01-01 01:01   lib/arm64-v8a/libayanarun.so
+     5792  1981-01-01 01:01   lib/arm64-v8a/libayanatrue.so
+     5334  1981-01-01 01:01   assets/apptest.sh
+103174144  1981-01-01 01:01   assets/rootfs.tar
