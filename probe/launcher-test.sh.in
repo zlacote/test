@@ -38,14 +38,15 @@ A='"$RUN" "$LD" --library-path "$LP"'
 B='env -i HOME=/root TERM="$TERM" LANG=C.UTF-8 PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin ANDROID_ROOT=/system ANDROID_DATA=/data "$RUN" --root "$R" /lib/ld-linux-aarch64.so.1 /usr/bin/bash -c'
 
 sec "1. mode A: glibc start with SIGSYS -> ENOSYS"
-run "$A \"\$R/usr/bin/true\"; echo \"true rc=\$?\""
+run "AYANA_TRACE=1 $A \"\$R/usr/bin/true\"; echo \"true rc=\$?\""
 run "$A \"\$R/usr/bin/uname\" -a"
 run "$A \"\$R/usr/bin/id\""
 run "$A \"\$R/usr/bin/ls\" \"\$HOME\"" 5
 run "$A \"\$R/usr/bin/cat\" \"\$R/etc/os-release\"" 3
-run "$A \"\$R/usr/bin/bash\" -c 'echo bash \$BASH_VERSION; ls >/dev/null; echo child rc=\$?'"
+run "$A \"\$R/usr/bin/bash\" -c 'echo bash \$BASH_VERSION; ls >/dev/null; echo \"child rc=\$? (159 is expected here: mode A has no own filter)\"'"
 
 sec "2. mode B: Debian sees its own root"
+run "${B/env -i /env -i AYANA_TRACE=1 } 'ls /bin/true >/dev/null; echo forked child rc=\$?'"
 run "$B 'cat /etc/os-release | head -n 2'"
 run "$B 'ls /; ls /usr/bin | wc -l'" 30
 run "$B 'grep -i seccomp /proc/self/status'"

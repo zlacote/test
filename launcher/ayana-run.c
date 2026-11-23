@@ -10,7 +10,7 @@
  *
  * Always installed: a SIGSYS handler. Syscalls killed by the platform
  * seccomp filter become -ENOSYS (a few are emulated instead), which is the
- * answer libc fallbacks expect.
+ * answer libc fallbacks expect. AYANA_TRACE=1 reports each such syscall once.
  *
  * With --root DIR (or AYANA_ROOT=DIR): an own seccomp filter traps path
  * syscalls made outside the launcher's syscall gate. The handler rewrites
@@ -463,14 +463,18 @@ static const struct pathcall PATHCALLS[] = {
 };
 #define NPATHCALLS ((int)(sizeof PATHCALLS / sizeof PATHCALLS[0]))
 
+struct ksigaction { void *handler; unsigned long flags; void *restorer; unsigned long mask; };
+#define SIGSYS_BIT (1UL << (SIGSYS - 1))
+
 static unsigned char g_seen[1024];
+static int g_trace; /* AYANA_TRACE set: report platform-blocked syscalls once */
 static volatile int g_probe_hit;
 
 static long on_blocked(long nr, long *a) {
 #ifdef __NR_accept
   if (nr == __NR_accept) return SC(__NR_accept4, a[0], a[1], a[2], 0, 0, 0);
 #endif
-  if (nr >= 0 && nr < 1024 && !g_seen[nr]) {
+  if (g_trace && nr >= 0 && nr < 1024 && !g_seen[nr]) {
     g_seen[nr] = 1;
     out("[ayana] blocked by platform: syscall ");
     out_num(nr);
@@ -482,6 +486,30 @@ static long on_blocked(long nr, long *a) {
 static long on_trapped(long nr, long *a) {
   if (nr == __NR_execve) return emu_execve((const char *)a[0], (char *const *)a[1], (char *const *)a[2]);
   if (nr == __NR_faccessat && a[1] == 0 && a[2] == 0x3a7) { g_probe_hit = 1; return 0; }
+  /* Invariant: SIGSYS is never blocked and never loses our handler. A trap
+   * that arrives while SIGSYS is blocked kills the process (glibc's fork
+   * child blocks all signals and then calls set_robust_list, which the
+   * platform filter traps). */
+  if (nr == __NR_rt_sigprocmask) {
+    if (a[1] && (a[0] == SIG_BLOCK || a[0] == SIG_SETMASK)) {
+      unsigned long set = *(const unsigned long *)a[1] & ~SIGSYS_BIT;
+      return ayana_gate(nr, a[0], (long)&set, a[2], a[3], 0, 0);
+    }
+    return ayana_gate(nr, a[0], a[1], a[2], a[3], 0, 0);
+  }
+  if (nr == __NR_rt_sigaction) {
+    if (a[0] == SIGSYS) { /* report default disposition, change nothing */
+      if (a[2]) memset((void *)a[2], 0, sizeof(struct ksigaction));
+      return 0;
+    }
+    if (a[1]) {
+      struct ksigaction k;
+      memcpy(&k, (const void *)a[1], sizeof k);
+      k.mask &= ~SIGSYS_BIT;
+      return ayana_gate(nr, a[0], (long)&k, a[2], a[3], 0, 0);
+    }
+    return ayana_gate(nr, a[0], a[1], a[2], a[3], 0, 0);
+  }
   for (int i = 0; i < NPATHCALLS; i++) {
     if (PATHCALLS[i].nr != nr) continue;
     char b1[PATH_CAP], b2[PATH_CAP];
@@ -509,8 +537,6 @@ static void on_sigsys(int sig, siginfo_t *si, void *ctx) {
   long r = (si->si_errno == AYANA_TAG) ? on_trapped(nr, a) : on_blocked(nr, a);
   UC_RET(uc) = (unsigned long)r;
 }
-
-struct ksigaction { void *handler; unsigned long flags; void *restorer; unsigned long mask; };
 
 static void install_handler(void) {
   struct ksigaction sa;
@@ -560,15 +586,15 @@ static long install_filter(void) {
     f[n++] = (struct sock_filter)BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, nr, 0, 1);
     f[n++] = (struct sock_filter)BPF_STMT(BPF_RET | BPF_K, SECCOMP_RET_TRAP | AYANA_TAG);
   }
-  /* rt_sigaction(SIGSYS, act != NULL): pretend success, keep our handler. */
-  f[n++] = (struct sock_filter)BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, __NR_rt_sigaction, 0, 7);
-  f[n++] = (struct sock_filter)BPF_STMT(BPF_LD | BPF_W | BPF_ABS, DATA_ARG_LO(0));
-  f[n++] = (struct sock_filter)BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, SIGSYS, 0, 5);
+  /* Signal mask and disposition changes go through the handler, see on_trapped. */
+  f[n++] = (struct sock_filter)BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, __NR_rt_sigprocmask, 0, 1);
+  f[n++] = (struct sock_filter)BPF_STMT(BPF_RET | BPF_K, SECCOMP_RET_TRAP | AYANA_TAG);
+  f[n++] = (struct sock_filter)BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, __NR_rt_sigaction, 0, 5);
   f[n++] = (struct sock_filter)BPF_STMT(BPF_LD | BPF_W | BPF_ABS, DATA_ARG_LO(1));
   f[n++] = (struct sock_filter)BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, 0, 0, 2);
   f[n++] = (struct sock_filter)BPF_STMT(BPF_LD | BPF_W | BPF_ABS, DATA_ARG_HI(1));
   f[n++] = (struct sock_filter)BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, 0, 1, 0);
-  f[n++] = (struct sock_filter)BPF_STMT(BPF_RET | BPF_K, SECCOMP_RET_ERRNO | 0);
+  f[n++] = (struct sock_filter)BPF_STMT(BPF_RET | BPF_K, SECCOMP_RET_TRAP | AYANA_TAG);
   f[n++] = (struct sock_filter)BPF_STMT(BPF_RET | BPF_K, SECCOMP_RET_ALLOW);
 
   struct sock_fprog prog = {(unsigned short)n, f};
@@ -609,6 +635,7 @@ __attribute__((used)) void ayana_main(uintptr_t *sp) {
   const char *root = 0;
   if (i + 1 < argc && seq(argv[i], "--root")) { root = argv[i + 1]; i += 2; }
   if (!root) root = getenv_in(envp, "AYANA_ROOT");
+  g_trace = getenv_in(envp, "AYANA_TRACE") != 0;
   if (i >= argc) die("usage: ayana-run [--root DIR] FILE [ARGS...]", 0);
 
   long n = SC(__NR_readlinkat, AT_FDCWD, "/proc/self/exe", g_self, PATH_CAP - 1, 0, 0);
