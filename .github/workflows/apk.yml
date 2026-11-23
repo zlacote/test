@@ -10,33 +10,85 @@ on:
       - '.github/workflows/apk.yml'
   workflow_dispatch:
 
+concurrency:
+  group: apk-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: write
 
+env:
+  JAVA_VERSION: '21'
+  GRADLE_VERSION: '8.9'
+  NDK_VERSION: '26.1.10909125'
+  BUILD_TOOLS_VERSION: '35.0.0'
+  GRADLE_OPTS: '-Dorg.gradle.daemon=false'
+
 jobs:
   build:
+    name: build-apk
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: ${{ env.JAVA_VERSION }}
+
+      - uses: android-actions/setup-android@v4
+        with:
+          cmdline-tools-version: 11076708
+          accept-android-sdk-licenses: true
+
+      - name: Install SDK components
+        run: |
+          mkdir -p build_out
+          sdkmanager --install "platforms;android-35" "build-tools;${BUILD_TOOLS_VERSION}" "ndk;${NDK_VERSION}" \
+            2>&1 | tail -n 5 | tee -a build_out/build.log
 
       - name: Debian rootfs (arm64, trixie-slim)
         run: |
-          mkdir -p build/assets
           docker pull --platform linux/arm64 debian:trixie-slim
           cid=$(docker create --platform linux/arm64 debian:trixie-slim)
-          docker export "$cid" > build/assets/rootfs.tar
-          ls -la build/assets
+          docker export "$cid" > android/app/src/main/assets/rootfs.tar
+          ls -la android/app/src/main/assets | tee -a build_out/build.log
+
+      - name: Native executables
+        run: bash android/native.sh 2>&1 | tee -a build_out/build.log
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v5
+        with:
+          gradle-version: ${{ env.GRADLE_VERSION }}
 
       - name: Build APK
-        run: bash android/build.sh 2>&1 | tee build/build.log
+        run: gradle -p android :app:assembleRelease --stacktrace --warning-mode summary 2>&1 | tee -a build_out/build.log
 
-      # Results go to the ci-out branch so they can be fetched with plain git.
+      - name: Collect APK
+        run: |
+          cp android/app/build/outputs/apk/release/app-release.apk build_out/ayana-test.apk
+          BT="${ANDROID_HOME}/build-tools/${BUILD_TOOLS_VERSION}"
+          "$BT/apksigner" verify --verbose build_out/ayana-test.apk | head -n 6 | tee -a build_out/build.log
+          "$BT/aapt2" dump badging build_out/ayana-test.apk | head -n 4 | tee -a build_out/build.log
+          unzip -l build_out/ayana-test.apk | grep -E 'lib/|assets/' | tee -a build_out/build.log
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v7
+        with:
+          name: ayana-test-apk
+          path: build_out/ayana-test.apk
+          if-no-files-found: error
+          compression-level: 0
+
+      # Also push results to the ci-out branch so they can be fetched with plain git.
       - name: Publish to ci-out
         if: always()
         run: |
           mkdir -p /tmp/out
-          cp build/build.log /tmp/out/ 2>/dev/null || echo "no build log" > /tmp/out/build.log
-          cp build/ayana-test.apk /tmp/out/ 2>/dev/null || true
+          cp build_out/build.log /tmp/out/ 2>/dev/null || echo "no build log" > /tmp/out/build.log
+          cp build_out/ayana-test.apk /tmp/out/ 2>/dev/null || true
           echo "${GITHUB_SHA} run ${GITHUB_RUN_NUMBER} ${{ job.status }}" > /tmp/out/BUILD_INFO
           cd /tmp/out
           git init -q
