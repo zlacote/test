@@ -520,6 +520,11 @@ static volatile int g_probe_hit;
 #define STAT_UID_OFF 28
 #define STAT_GID_OFF 32
 #endif
+#if defined(__aarch64__)
+#define STAT_MODE_OFF 16
+#else
+#define STAT_MODE_OFF 24
+#endif
 #define STATX_UID_OFF 20
 #define STATX_GID_OFF 24
 
@@ -572,6 +577,39 @@ static long emulate_ids(long nr, long *a, int *handled) {
   }
   *handled = 0;
   return 0;
+}
+
+/* Hard links are refused in app storage. A link that the kernel refuses
+ * becomes a copy (a symlink is copied as a symlink): what dpkg and most
+ * tools use links for is "keep this content under a second name". */
+static long emu_link(long odfd, const char *op, long ndfd, const char *np, long flags) {
+  unsigned char st[256];
+  long r = SC(__NR_newfstatat, odfd, op, st, (flags & AT_SYMLINK_FOLLOW) ? 0 : AT_SYMLINK_NOFOLLOW, 0, 0);
+  if (r) return r;
+  unsigned int mode = *(unsigned int *)(st + STAT_MODE_OFF);
+  if ((mode & 0170000) == 0120000) {
+    char t[PATH_CAP];
+    long n = SC(__NR_readlinkat, odfd, op, t, PATH_CAP - 1, 0, 0);
+    if (n < 0) return n;
+    t[n] = 0;
+    return SC(__NR_symlinkat, t, ndfd, np, 0, 0, 0);
+  }
+  if ((mode & 0170000) != 0100000) return -1; /* EPERM: only files and symlinks */
+  long in = SC(__NR_openat, odfd, op, O_RDONLY | O_CLOEXEC, 0, 0, 0);
+  if (in < 0) return in;
+  long out = SC(__NR_openat, ndfd, np, O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, mode & 07777, 0, 0);
+  if (out < 0) { SC(__NR_close, in, 0, 0, 0, 0, 0); return out; }
+  r = 0;
+  for (;;) {
+    long k = SC(__NR_copy_file_range, in, 0, out, 0, 1L << 30, 0);
+    if (k < 0) k = SC(__NR_sendfile, out, in, 0, 1L << 30, 0, 0);
+    if (k == 0) break;
+    if (k < 0) { r = k; break; }
+  }
+  SC(__NR_close, in, 0, 0, 0, 0, 0);
+  SC(__NR_close, out, 0, 0, 0, 0, 0);
+  if (r) SC(__NR_unlinkat, ndfd, np, 0, 0, 0, 0);
+  return r;
 }
 
 static long on_blocked(long nr, long *a) {
@@ -692,6 +730,13 @@ static long on_trapped(long nr, long *a) {
       return r;
     }
     long r = ayana_gate(nr, x[0], x[1], x[2], x[3], x[4], x[5]);
+#ifdef AYANA_TEST_NO_HARDLINKS
+    if (nr == __NR_linkat && !r) { SC(__NR_unlinkat, x[2], x[3], 0, 0, 0, 0); r = -13; }
+#endif
+    if (nr == __NR_linkat && (r == -13 || r == -1)) return emu_link(x[0], (const char *)x[1], x[2], (const char *)x[3], x[4]);
+#ifdef __NR_link
+    if (nr == __NR_link && (r == -13 || r == -1)) return emu_link(AT_FDCWD, (const char *)x[0], AT_FDCWD, (const char *)x[1], 0);
+#endif
     if (nr == __NR_newfstatat && !r) fix_owner(a[2], STAT_UID_OFF, STAT_GID_OFF);
 #ifdef __NR_stat
     if ((nr == __NR_stat || nr == __NR_lstat) && !r) fix_owner(a[1], STAT_UID_OFF, STAT_GID_OFF);

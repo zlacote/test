@@ -25,7 +25,7 @@ run() {  # run "<shell command>" [max_lines]
 
 # A: handler only, real paths.  B: handler + path mapping, Debian sees its own /.
 A='"$RUN" "$LD" --library-path "$LP"'
-BENV='env -i HOME=/root TERM=dumb LANG=C.UTF-8 PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin'
+BENV='env -i HOME=/root TERM=dumb LANG=C.UTF-8 DEBIAN_FRONTEND=noninteractive PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin'
 B="$BENV"' "$RUNL" --root "$R" /lib/ld-linux-aarch64.so.1 /usr/bin/bash -c'
 BF="$BENV"' "$RUNL" --root "$R" --fakeroot /lib/ld-linux-aarch64.so.1 /usr/bin/bash -c'
 BT="$BENV"' AYANA_TRACE=1 "$RUNL" --root "$R" /lib/ld-linux-aarch64.so.1 /usr/bin/bash -c'
@@ -77,6 +77,8 @@ run "$BF 'touch /tmp/o && chown 42:42 /tmp/o && echo chown ok && stat -c \"%U %G
 
 sec "8. apt and real packages"
 run "$BF 'cat /etc/resolv.conf; getent hosts deb.debian.org; echo dns rc=\$?'"
+run "$BF 'dpkg --configure -a 2>&1 | tail -n 5; echo dpkg-configure rc=\${PIPESTATUS[0]}'"
+run "$BF 'echo old > /tmp/h1 && ln -f /tmp/h1 /tmp/h2 && cat /tmp/h2 && echo hardlink emulation ok'"
 run "$BF 'timeout 180 apt-get -o Debug::RunScripts=true update 2>&1 | tail -n 15; echo apt-update rc=\${PIPESTATUS[0]}'" 20
 run "$BF 'time timeout 900 apt-get install -y --no-install-recommends file procps python3 git ca-certificates hostname 2>&1 | grep -vE \"^(Get|Selecting|Preparing|Unpacking|Setting up|Processing)\" | tail -n 25; echo apt-install rc=\${PIPESTATUS[0]}'" 40
 run "$BF 'dpkg -l file procps python3 git ca-certificates hostname 2>&1 | tail -n 6'"
