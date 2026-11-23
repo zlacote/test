@@ -7,7 +7,12 @@ PROBE="$LIB/libayanaprobe.so"
 TRUEBIN="$LIB/libayanatrue.so"
 LD="$R/usr/lib/aarch64-linux-gnu/ld-linux-aarch64.so.1"
 LP="$R/usr/lib/aarch64-linux-gnu"
-export RUN PROBE TRUEBIN LD LP R
+# The lib dir path contains "=" (/data/app/~~xxx==/...), which env(1) would
+# read as a variable assignment. A symlink gives the launcher a clean name;
+# exec through it is still an exec of the file in the lib dir.
+RUNL="$TMPDIR/ayana-run"
+ln -sf "$RUN" "$RUNL"
+export RUN RUNL PROBE TRUEBIN LD LP R
 
 sec() { echo; echo "=== $1 ==="; }
 run() {  # run "<shell command>" [max_lines]
@@ -21,8 +26,8 @@ run() {  # run "<shell command>" [max_lines]
 # A: handler only, real paths.  B: handler + path mapping, Debian sees its own /.
 A='"$RUN" "$LD" --library-path "$LP"'
 BENV='env -i HOME=/root TERM=dumb LANG=C.UTF-8 PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin'
-B="$BENV"' "$RUN" --root "$R" /lib/ld-linux-aarch64.so.1 /usr/bin/bash -c'
-BT="$BENV"' AYANA_TRACE=1 "$RUN" --root "$R" /lib/ld-linux-aarch64.so.1 /usr/bin/bash -c'
+B="$BENV"' "$RUNL" --root "$R" /lib/ld-linux-aarch64.so.1 /usr/bin/bash -c'
+BT="$BENV"' AYANA_TRACE=1 "$RUNL" --root "$R" /lib/ld-linux-aarch64.so.1 /usr/bin/bash -c'
 
 sec "1. app sandbox"
 run 'id; cat /proc/self/attr/current; echo'
