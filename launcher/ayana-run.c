@@ -12,6 +12,10 @@
  * seccomp filter become -ENOSYS (a few are emulated instead), which is the
  * answer libc fallbacks expect. AYANA_TRACE=1 reports each such syscall once.
  *
+ * With --fakeroot (or AYANA_FAKEROOT=1): uid/gid queries report root, uid
+ * and gid changes and chown succeed without effect (credentials are tracked
+ * per process), and files owned by the app uid are reported as owned by root.
+ *
  * With --root DIR (or AYANA_ROOT=DIR): an own seccomp filter traps path
  * syscalls made outside the launcher's syscall gate. The handler rewrites
  * absolute paths under the mapped prefixes to DIR/..., performs the call
@@ -165,6 +169,11 @@ static size_t g_rootlen;
 static int g_map_on;
 static char g_self[PATH_CAP];
 
+/* fake root: [0] uids, [1] gids; each real, effective, saved */
+static int g_fake;
+static long g_fid[2][3];
+static long g_real_uid, g_real_gid;
+
 static const char *const MAPPED[] = {"/etc", "/usr", "/bin", "/sbin", "/lib", "/lib64", "/var",
                                      "/opt", "/root", "/home", "/tmp", "/srv", "/run", "/mnt",
                                      "/media", "/boot", 0};
@@ -183,6 +192,17 @@ static int map_path(const char *in, char *out_buf) {
   memcpy(out_buf, g_root, g_rootlen);
   memcpy(out_buf + g_rootlen, in, n + 1);
   return 1;
+}
+
+/* Reverse of map_path for paths the kernel hands back (readlink, getcwd):
+ * strips the root prefix in place. n is the string length; returns the new one. */
+static long unmap_inplace(char *buf, long n) {
+  if (!g_map_on || n < (long)g_rootlen) return n;
+  for (size_t k = 0; k < g_rootlen; k++) if (buf[k] != g_root[k]) return n;
+  if (n == (long)g_rootlen) { buf[0] = '/'; return 1; }
+  if (buf[g_rootlen] != '/') return n;
+  for (long k = (long)g_rootlen; k < n; k++) buf[k - g_rootlen] = buf[k];
+  return n - (long)g_rootlen;
 }
 
 /* ------------------------------------------------------------------ */
@@ -356,6 +376,20 @@ static long emu_execve(const char *path, char *const *argv, char *const *envp) {
   if (kind == K_DYNAMIC || kind == K_STATIC) {
     vec[v++] = g_self;
     if (g_map_on) { vec[v++] = "--root"; vec[v++] = g_root; }
+    if (g_fake) {
+      char *id = str + 7680; /* "uid,gid" of the exec'ing process */
+      char tmp[24];
+      long k = 0;
+      for (int w = 0; w < 2; w++) {
+        unsigned long u = (unsigned long)g_fid[w][1];
+        int t = 0;
+        do { tmp[t++] = (char)('0' + u % 10); u /= 10; } while (u);
+        while (t) id[k++] = tmp[--t];
+        id[k++] = w ? 0 : ',';
+      }
+      vec[v++] = "--fakeid";
+      vec[v++] = id;
+    }
     if (kind == K_DYNAMIC) {
       char *ip = dyn_interp;
       memcpy(ip, interp, slen(interp) + 1);
@@ -470,7 +504,74 @@ static unsigned char g_seen[1024];
 static int g_trace; /* AYANA_TRACE set: report platform-blocked syscalls once */
 static volatile int g_probe_hit;
 
+/* struct stat / struct statx owner fields (kernel layout). */
+#if defined(__aarch64__)
+#define STAT_UID_OFF 24
+#define STAT_GID_OFF 28
+#else
+#define STAT_UID_OFF 28
+#define STAT_GID_OFF 32
+#endif
+#define STATX_UID_OFF 20
+#define STATX_GID_OFF 24
+
+static void fix_owner(long buf, int uoff, int goff) {
+  if (!g_fake || !buf) return;
+  unsigned int *u = (unsigned int *)(buf + uoff), *g = (unsigned int *)(buf + goff);
+  if (*u == (unsigned int)g_real_uid) *u = 0;
+  if (*g == (unsigned int)g_real_gid) *g = 0;
+}
+
+#define NOCHANGE(x) ((unsigned int)(x) == 0xffffffffu)
+
+/* Credential calls under fake root. Sets *handled when nr is one of them. */
+static long emulate_ids(long nr, long *a, int *handled) {
+  *handled = 1;
+  switch (nr) {
+  case __NR_getuid: return g_fid[0][0];
+  case __NR_geteuid: return g_fid[0][1];
+  case __NR_getgid: return g_fid[1][0];
+  case __NR_getegid: return g_fid[1][1];
+  case __NR_getresuid:
+  case __NR_getresgid: {
+    int w = nr == __NR_getresgid;
+    for (int k = 0; k < 3; k++) if (a[k]) *(unsigned int *)a[k] = (unsigned int)g_fid[w][k];
+    return 0;
+  }
+  case __NR_setuid:
+  case __NR_setgid: {
+    int w = nr == __NR_setgid;
+    g_fid[w][0] = g_fid[w][1] = g_fid[w][2] = (unsigned int)a[0];
+    return 0;
+  }
+  case __NR_setreuid:
+  case __NR_setregid: {
+    int w = nr == __NR_setregid;
+    if (!NOCHANGE(a[0])) g_fid[w][0] = (unsigned int)a[0];
+    if (!NOCHANGE(a[1])) g_fid[w][1] = g_fid[w][2] = (unsigned int)a[1];
+    return 0;
+  }
+  case __NR_setresuid:
+  case __NR_setresgid: {
+    int w = nr == __NR_setresgid;
+    for (int k = 0; k < 3; k++) if (!NOCHANGE(a[k])) g_fid[w][k] = (unsigned int)a[k];
+    return 0;
+  }
+  case __NR_setfsuid: return g_fid[0][1];
+  case __NR_setfsgid: return g_fid[1][1];
+  case __NR_setgroups: return 0;
+  case __NR_fchown: return 0;
+  }
+  *handled = 0;
+  return 0;
+}
+
 static long on_blocked(long nr, long *a) {
+  if (g_fake) {
+    int h;
+    long r = emulate_ids(nr, a, &h);
+    if (h) return r;
+  }
 #ifdef __NR_accept
   if (nr == __NR_accept) return SC(__NR_accept4, a[0], a[1], a[2], 0, 0, 0);
 #endif
@@ -510,8 +611,35 @@ static long on_trapped(long nr, long *a) {
     }
     return ayana_gate(nr, a[0], a[1], a[2], a[3], 0, 0);
   }
+  if (g_fake) {
+    int h;
+    long r = emulate_ids(nr, a, &h);
+    if (h) return r;
+  }
+  if (nr == __NR_getcwd) {
+    long r = ayana_gate(nr, a[0], a[1], 0, 0, 0, 0);
+    if (r > 1) {
+      r = unmap_inplace((char *)a[0], r - 1);
+      ((char *)a[0])[r++] = 0;
+    }
+    return r;
+  }
+  if (nr == __NR_fstat) {
+    long r = ayana_gate(nr, a[0], a[1], 0, 0, 0, 0);
+    if (!r) fix_owner(a[1], STAT_UID_OFF, STAT_GID_OFF);
+    return r;
+  }
   for (int i = 0; i < NPATHCALLS; i++) {
     if (PATHCALLS[i].nr != nr) continue;
+    if (g_fake && (nr == __NR_fchownat
+#ifdef __NR_chown
+                   || nr == __NR_chown
+#endif
+#ifdef __NR_lchown
+                   || nr == __NR_lchown
+#endif
+                   ))
+      return 0;
     char b1[PATH_CAP], b2[PATH_CAP];
     long x[6];
     for (int k = 0; k < 6; k++) x[k] = a[k];
@@ -523,7 +651,47 @@ static long on_trapped(long nr, long *a) {
       if (m < 0) return m;
       if (m) x[PATHCALLS[i].p2] = (long)b2;
     }
-    return ayana_gate(nr, x[0], x[1], x[2], x[3], x[4], x[5]);
+    /* An absolute symlink target is stored with the root prefix, so the
+     * kernel resolves it inside the rootfs; readlink strips it again. */
+    int tgt = -1;
+    if (nr == __NR_symlinkat) tgt = 0;
+#ifdef __NR_symlink
+    if (nr == __NR_symlink) tgt = 0;
+#endif
+    if (tgt >= 0) {
+      m = map_path((const char *)a[tgt], b2);
+      if (m < 0) return m;
+      if (m) x[tgt] = (long)b2;
+    }
+    int rl = -1; /* index of the readlink output buffer */
+    if (nr == __NR_readlinkat) rl = 2;
+#ifdef __NR_readlink
+    if (nr == __NR_readlink) rl = 1;
+#endif
+    if (rl >= 0) {
+      /* Read the whole target, strip the prefix, then truncate to the
+       * caller's size: a prefixed target that the kernel cut short must not
+       * come back as a short, seemingly complete answer. */
+      char *full = b2; /* free here: readlink calls have no second path */
+      long cap = x[rl + 1];
+      x[rl] = (long)full;
+      x[rl + 1] = PATH_CAP;
+      long r = ayana_gate(nr, x[0], x[1], x[2], x[3], x[4], x[5]);
+      if (r <= 0) return r;
+      r = unmap_inplace(full, r);
+      if (r > cap) r = cap;
+      memcpy((void *)a[rl], full, (size_t)r);
+      return r;
+    }
+    long r = ayana_gate(nr, x[0], x[1], x[2], x[3], x[4], x[5]);
+    if (nr == __NR_newfstatat && !r) fix_owner(a[2], STAT_UID_OFF, STAT_GID_OFF);
+#ifdef __NR_stat
+    if ((nr == __NR_stat || nr == __NR_lstat) && !r) fix_owner(a[1], STAT_UID_OFF, STAT_GID_OFF);
+#endif
+#ifdef __NR_statx
+    if (nr == __NR_statx && !r) fix_owner(a[4], STATX_UID_OFF, STATX_GID_OFF);
+#endif
+    return r;
   }
   return ayana_gate(nr, a[0], a[1], a[2], a[3], a[4], a[5]);
 }
@@ -581,9 +749,18 @@ static long install_filter(void) {
   f[n++] = (struct sock_filter)BPF_JUMP(BPF_JMP | BPF_JGE | BPF_K, (uint32_t)hi, 1, 0);
   f[n++] = (struct sock_filter)BPF_STMT(BPF_RET | BPF_K, SECCOMP_RET_ALLOW);
   f[n++] = (struct sock_filter)BPF_STMT(BPF_LD | BPF_W | BPF_ABS, DATA_NR);
-  for (int i = 0; i <= NPATHCALLS; i++) {
-    int nr = i < NPATHCALLS ? PATHCALLS[i].nr : __NR_execve;
-    f[n++] = (struct sock_filter)BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, nr, 0, 1);
+  static const int EXTRA[] = {__NR_execve, __NR_getcwd};
+  static const int FAKE[] = {__NR_getuid, __NR_geteuid, __NR_getgid, __NR_getegid, __NR_getresuid,
+                             __NR_getresgid, __NR_setuid, __NR_setgid, __NR_setreuid, __NR_setregid,
+                             __NR_setresuid, __NR_setresgid, __NR_setfsuid, __NR_setfsgid,
+                             __NR_setgroups, __NR_fchown, __NR_fstat};
+  int list[NPATHCALLS + 32], cnt = 0;
+  for (int i = 0; i < NPATHCALLS; i++) list[cnt++] = PATHCALLS[i].nr;
+  for (unsigned i = 0; i < sizeof EXTRA / sizeof EXTRA[0]; i++) list[cnt++] = EXTRA[i];
+  if (g_fake)
+    for (unsigned i = 0; i < sizeof FAKE / sizeof FAKE[0]; i++) list[cnt++] = FAKE[i];
+  for (int i = 0; i < cnt; i++) {
+    f[n++] = (struct sock_filter)BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, list[i], 0, 1);
     f[n++] = (struct sock_filter)BPF_STMT(BPF_RET | BPF_K, SECCOMP_RET_TRAP | AYANA_TAG);
   }
   /* Signal mask and disposition changes go through the handler, see on_trapped. */
@@ -632,11 +809,27 @@ __attribute__((used)) void ayana_main(uintptr_t *sp) {
     if (a[0] == AT_PAGESZ) g_pg = (long)a[1];
 
   int i = 1;
-  const char *root = 0;
-  if (i + 1 < argc && seq(argv[i], "--root")) { root = argv[i + 1]; i += 2; }
+  const char *root = 0, *fakeid = 0;
+  while (i < argc && argv[i][0] == '-' && argv[i][1] == '-') {
+    if (seq(argv[i], "--root") && i + 1 < argc) { root = argv[i + 1]; i += 2; }
+    else if (seq(argv[i], "--fakeroot")) { g_fake = 1; i++; }
+    else if (seq(argv[i], "--fakeid") && i + 1 < argc) { g_fake = 1; fakeid = argv[i + 1]; i += 2; }
+    else break;
+  }
   if (!root) root = getenv_in(envp, "AYANA_ROOT");
+  if (getenv_in(envp, "AYANA_FAKEROOT")) g_fake = 1;
+  if (g_fake) {
+    g_real_uid = SC(__NR_getuid, 0, 0, 0, 0, 0, 0);
+    g_real_gid = SC(__NR_getgid, 0, 0, 0, 0, 0, 0);
+    long v[2] = {0, 0};
+    for (int w = 0; fakeid && w < 2 && *fakeid; w++) {
+      while (*fakeid >= '0' && *fakeid <= '9') v[w] = v[w] * 10 + (*fakeid++ - '0');
+      if (*fakeid == ',') fakeid++;
+    }
+    for (int k = 0; k < 3; k++) { g_fid[0][k] = v[0]; g_fid[1][k] = v[1]; }
+  }
   g_trace = getenv_in(envp, "AYANA_TRACE") != 0;
-  if (i >= argc) die("usage: ayana-run [--root DIR] FILE [ARGS...]", 0);
+  if (i >= argc) die("usage: ayana-run [--root DIR] [--fakeroot] FILE [ARGS...]", 0);
 
   long n = SC(__NR_readlinkat, AT_FDCWD, "/proc/self/exe", g_self, PATH_CAP - 1, 0, 0);
   if (n <= 0) die("cannot read /proc/self/exe", n);

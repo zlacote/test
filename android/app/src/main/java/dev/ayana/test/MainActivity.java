@@ -6,6 +6,7 @@ import android.graphics.Typeface;
 import android.net.Uri;
 import android.os.Bundle;
 import android.provider.MediaStore;
+import android.provider.Settings;
 import android.system.ErrnoException;
 import android.system.Os;
 import android.system.OsConstants;
@@ -80,19 +81,24 @@ public class MainActivity extends Activity {
     private void work() {
         try {
             File rootfs = new File(getFilesDir(), "rootfs");
-            File marker = new File(getFilesDir(), "rootfs.ok");
+            // v2: absolute symlinks are stored with the rootfs prefix.
+            File marker = new File(getFilesDir(), "rootfs-v2.ok");
+            //noinspection ResultOfMethodCallIgnored
+            new File(getFilesDir(), "rootfs.ok").delete();
             if (!marker.exists()) {
                 append("extracting Debian rootfs (first run only)...");
                 deleteTree(rootfs);
                 long t0 = System.currentTimeMillis();
                 try (InputStream in = getAssets().open("rootfs.tar")) {
-                    extractTar(in, rootfs);
+                    extractTar(in, rootfs, rootfs.getAbsolutePath());
                 }
                 writeText(new File(rootfs, "etc/resolv.conf"), "nameserver 8.8.8.8\nnameserver 1.1.1.1\n");
                 writeText(new File(rootfs, "etc/hosts"), "127.0.0.1 localhost\n::1 localhost\n");
                 if (!marker.createNewFile()) append("warning: cannot create marker");
                 append("extracted in " + (System.currentTimeMillis() - t0) + " ms");
             }
+            append("phantom process monitor setting: "
+                    + Settings.Global.getString(getContentResolver(), "settings_enable_monitor_phantom_procs"));
             File script = new File(getFilesDir(), "apptest.sh");
             try (InputStream in = getAssets().open("apptest.sh"); OutputStream out = new FileOutputStream(script)) {
                 copy(in, out, -1);
@@ -193,7 +199,20 @@ public class MainActivity extends Activity {
     // ------------------------------------------------------------------
     // minimal tar reader (ustar, GNU long names, pax path/linkpath)
 
-    private static void extractTar(InputStream raw, File dest) throws IOException, ErrnoException {
+    /** Top-level directories that the launcher maps into the rootfs (same rule as map_path). */
+    private static final String[] MAPPED = {"etc", "usr", "bin", "sbin", "lib", "lib64", "var", "opt",
+            "root", "home", "tmp", "srv", "run", "mnt", "media", "boot"};
+
+    /** Absolute symlink targets inside the mapped tree get the rootfs prefix, so the kernel resolves them there. */
+    private static String linkTarget(String link, String prefix) {
+        if (prefix == null || !link.startsWith("/")) return link;
+        if (link.equals("/")) return prefix;
+        String first = link.substring(1).split("/", 2)[0];
+        for (String m : MAPPED) if (m.equals(first)) return prefix + link;
+        return link;
+    }
+
+    private static void extractTar(InputStream raw, File dest, String linkPrefix) throws IOException, ErrnoException {
         InputStream in = new BufferedInputStream(raw, 1 << 16);
         byte[] h = new byte[512];
         String longName = null, longLink = null, paxPath = null, paxLink = null;
@@ -244,7 +263,7 @@ public class MainActivity extends Activity {
                     break;
                 case '2':
                     if (isSymlink(f) || f.exists()) f.delete();
-                    Os.symlink(link, f.getPath());
+                    Os.symlink(linkTarget(link, linkPrefix), f.getPath());
                     skip(in, size + pad(size));
                     break;
                 case '1': {
