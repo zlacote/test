@@ -1,0 +1,46 @@
+name: apk
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'android/**'
+      - 'launcher/**'
+      - 'probe/**'
+      - '.github/workflows/apk.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Debian rootfs (arm64, trixie-slim)
+        run: |
+          mkdir -p build/assets
+          docker pull --platform linux/arm64 debian:trixie-slim
+          cid=$(docker create --platform linux/arm64 debian:trixie-slim)
+          docker export "$cid" > build/assets/rootfs.tar
+          ls -la build/assets
+
+      - name: Build APK
+        run: bash android/build.sh 2>&1 | tee build/build.log
+
+      # Results go to the ci-out branch so they can be fetched with plain git.
+      - name: Publish to ci-out
+        if: always()
+        run: |
+          mkdir -p /tmp/out
+          cp build/build.log /tmp/out/ 2>/dev/null || echo "no build log" > /tmp/out/build.log
+          cp build/ayana-test.apk /tmp/out/ 2>/dev/null || true
+          echo "${GITHUB_SHA} run ${GITHUB_RUN_NUMBER} ${{ job.status }}" > /tmp/out/BUILD_INFO
+          cd /tmp/out
+          git init -q
+          git checkout -q -b ci-out
+          git add -A
+          git -c user.name=ci -c user.email=ci@localhost commit -q -m "build ${GITHUB_SHA}"
+          git push -q -f "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${GITHUB_REPOSITORY}" ci-out

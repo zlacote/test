@@ -18,7 +18,7 @@ run() {  # run "<shell command>" [max_lines]
 sec "0. setup"
 command -v clang >/dev/null 2>&1 || pkg install -y clang >/dev/null 2>&1
 cat > "$WORK/ayana-run.c" <<'CEOF'
-@@AYANA_RUN_C@@
+@@INCLUDE launcher/ayana-run.c@@
 CEOF
 RUN="$TMPDIR/ayana-run"
 if ! clang -static -nostdlib -fno-pie -no-pie -ffreestanding -fno-stack-protector \
